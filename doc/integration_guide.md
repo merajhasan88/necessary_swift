@@ -22,9 +22,7 @@ Binary values travel as base64url without padding, hashes are lower-case hex SHA
 ## 1. The installation key
 
 On first use the plugin creates an **installation key**: ECDSA P-256 (ES256), never exportable by the
-app. On Android it is generated inside Android Keystore — in StrongBox where the phone has one, otherwise
-wherever that phone's Keystore keeps keys, its secure hardware or, on some phones, software. On iOS the
-plugin asks the Secure Enclave first; where it refuses — the Simulator, or a configuration that declines
+app. The plugin asks the iPhone's Secure Enclave first; where it refuses — the Simulator, or a configuration that declines
 the key — the plugin falls back to a Keychain key marked not extractable: a software key, which a
 compromised phone can copy. `key_security` (below) is what the phone says about where its key is. Your
 backend only ever sees the public key.
@@ -38,9 +36,9 @@ that were signed — never over JSON you encoded again yourself.**
 | Field | Meaning |
 |---|---|
 | `installation_id` | a UUID the app proposes |
-| `platform` | `android` or `ios` |
+| `platform` | `ios` |
 | `public_key` | a JWK: `kty` `EC`, `crv` `P-256`, `alg` `ES256`, `x`, `y` |
-| `reinstall_hint` | `kind` (`android_id_sha256` or `idfv_sha256`) and `value`, a SHA-256 of the platform's per-app device identifier; or `null` |
+| `reinstall_hint` | `kind` (`idfv_sha256`) and `value`, a SHA-256 of the identifier for vendor, the phone's per-vendor device identifier; or `null` |
 | `key_security` | `security_level`, `hardware_backed`, `provider`: what the phone says about its own key |
 
 Your backend:
@@ -56,23 +54,19 @@ Your backend:
 3. Keys the reinstall hint with a secret of its own (HMAC-SHA256) before storing it. **The hint is what
    the app says**: a modified app can send another phone's hint, or a new one every time, and keying it
    does not make its origin genuine. It links reinstalls on one phone provisionally; it never
-   authenticates anyone. On Android it changes when the app's signing key changes.
+   authenticates anyone.
 4. Records `key_security` but never relies on it: the phone cannot prove it.
 5. Trusts nothing about the installation until it has proved that it holds the key.
 
 ### Installations and phones
 
-An installation is one key — its thumbprint, exact within this protocol. What becomes of the key when
-the app is removed depends on the platform:
-
-- **Android** deletes the key with the app. A reinstall makes a new key, so a new installation, while the
-  reinstall hint stays the same until the phone is reset or the app's signing key changes.
-- **iOS** keeps the key, and the installation ID the plugin stores beside it, in the Keychain — and
-  Apple does not promise whether Keychain items outlive the app. A reinstall may come back with the same
-  key, so the same installation (step 2 above); with the key but without the app's other data; or with
-  neither, so a new key. The hint stays the same until every app from your company has been removed.
-  Handle all three: the same thumbprint is the same installation, whatever else the app forgot, and a
-  session your app kept in the Keychain may come back with it.
+An installation is one key — its thumbprint, exact within this protocol. When the app is removed, iOS
+keeps the key, and the installation ID the plugin stores beside it, in the Keychain — and Apple does not
+promise whether Keychain items outlive the app. A reinstall may come back with the same key, so the
+same installation (step 2 above); with the key but without the app's other data; or with neither, so a
+new key. The hint stays the same until every app from your company has been removed.
+Handle all three: the same thumbprint is the same installation, whatever else the app forgot, and a
+session your app kept in the Keychain may come back with it.
 
 So **a phone, as far as the hint can tell, is every installation that shares a reinstall hint**: count
 accounts, reinstalls and limits per phone (section 7) — knowing that a fraudster who sends fresh hints
@@ -119,10 +113,9 @@ so that you need not store it. The app answers with `installation_id`, `challeng
 
 Ask for every measurement you rely on every time, and vary the others from scan to scan, so that a
 tampered app cannot prepare its answers. **Rely on every measurement that would catch tampering** — the
-hooks, gadgets and changes to the app's code in memory among them: on Android `runtime_maps`,
-`frida_ports`, `instrumentation_threads`, `exec_mappings` and `code_integrity`; on iOS `dyld_images`,
-`environment` and `code_integrity`. One left to chance is one a tampered app waits out, scanning again
-until it is not asked for. Ask for iOS `code_integrity` too, although every report carries it: only a
+hooks, gadgets and changes to the app's code in memory among them: `dyld_images`, `environment` and
+`code_integrity`. One left to chance is one a tampered app waits out, scanning again until it is not
+asked for. Ask for `code_integrity` too, although every report carries it: only a
 report that lacks a measurement you asked for is refused. Issue a challenge only to a session that has
 proved its key, and limit how often one installation may ask.
 
@@ -134,7 +127,7 @@ The app sends `report_payload` — the base64url of these UTF-8 JSON bytes — a
 |---|---|
 | `challenge_id`, `challenge_nonce` | the challenge it answers |
 | `installation_id` | the installation whose key signs it |
-| `platform` | `android` or `ios` |
+| `platform` | `ios` |
 | `collector_version` | the plugin's measurement version, an integer |
 | `collected_at` | the phone's clock, in Unix seconds |
 | `probe_results` | one object per measurement (section 6) |
@@ -221,7 +214,7 @@ how the key is unlocked; your backend decides which requests need it.
 | factor `passcode` | the phone's passcode: its PIN, pattern or password |
 | factor `biometric` | a biometric enrolled now, such as a fingerprint or a face |
 | mode `per_use` | the person unlocks the key for every signature |
-| mode `windowed` | one unlock lets the key sign for `window_seconds` — Android only. Android 9 and 10 cannot ask for the passcode at every signature, so there a passcode key is windowed, and says so |
+| mode `windowed` | one unlock lets the key sign for `window_seconds`; iOS makes per-use keys only, so an iPhone never sends it |
 
 Removing the screen lock — or, for a biometric key, enrolling another biometric — makes the key
 unusable. The app then makes a new one, which your backend takes only by re-enrolment (below).
@@ -241,7 +234,7 @@ Your backend:
 2. Refuses a step-up key whose thumbprint is the installation key's: it would add nothing.
 3. Records `stepup_key_auth` and, like `key_security`, never treats it as proof. Compare it with what
    you require, and decide whether to accept a weaker key — a windowed one where you want every signature
-   unlocked; refusing it shuts out the owners of Android 9 and 10 phones.
+   unlocked.
 
 **The proof.** A request that needs step-up carries, beside its request proof, `X-Step-Up-Proof` — the
 base64url of these JSON bytes — and `X-Step-Up-Signature`, the step-up key's signature over them:
@@ -355,11 +348,11 @@ Requests and answers, in JSON. An answer may carry more fields; the plugin passe
 
 ```text
 POST /v1/installations/register
-  {"installation_id": "0f1d…", "platform": "android",
+  {"installation_id": "0f1d…", "platform": "ios",
    "public_key": {"kty": "EC", "crv": "P-256", "alg": "ES256", "x": "…", "y": "…"},
-   "reinstall_hint": {"kind": "android_id_sha256", "value": "9c1e…"},
-   "key_security": {"security_level": "strongbox", "hardware_backed": true,
-                    "provider": "AndroidKeyStore"}}
+   "reinstall_hint": {"kind": "idfv_sha256", "value": "9c1e…"},
+   "key_security": {"security_level": "secure_enclave", "hardware_backed": true,
+                    "provider": "SecureEnclave"}}
 → {"installation_id": "0f1d…"}                       the installation you hold for this key
 
 POST /v1/installations/challenge
@@ -374,8 +367,8 @@ POST /v1/integrity/challenge
   {}   or, under the account session, for a scan that approves one request (section 2),
   {"operation": {"method": "POST", "path": "/v1/account/transfer", "query": "",
                  "body_sha256": "98ab…"}}
-→ {"challenge_id": "7c5e…", "nonce": "q3Vn…", "platform": "android",
-   "required_probes": ["app_identity", "debug_state", …], "optional_probes": [],
+→ {"challenge_id": "7c5e…", "nonce": "q3Vn…", "platform": "ios",
+   "required_probes": ["app_identity", "code_signing", …], "optional_probes": [],
    "expires_at": "2026-10-20T12:01:00Z"}
 
 POST /v1/integrity/report
@@ -403,9 +396,7 @@ POST /v1/installations/stepup-key                    with step-up on: a new key 
                                                     request proof's nonce
 ```
 
-- `security_level` is `strongbox`, `trusted_execution_environment`, `secure_hardware`, `software` or
-  `unknown` on Android, and `secure_enclave` or `software` on iOS; `provider` is `AndroidKeyStore`,
-  `SecureEnclave` or `Keychain`.
+- `security_level` is `secure_enclave` or `software`; `provider` is `SecureEnclave` or `Keychain`.
 - Prefer key challenges that store nothing — a payload carrying your HMAC — so that asking for one
   cannot fill a table, and limit registrations and challenges per network address.
 - The rest of a report's answer is yours, in the same `integrity` object: tell the app what to do next,
@@ -504,49 +495,26 @@ def signed_bytes(jwk, payload_b64, signature_b64):
 report's schema (`report.schema.json`: every measurement's fields with their types, units and bounds),
 the rules a schema cannot state (`RULES.md`: when a measurement is complete, how its figures add up,
 what contradicts itself, how versions change), and sample reports judged each way (`samples/`). The
-folder's name is two versions: `report-1` is the report's format, version 1, and `android-8-ios-5` the
-lowest versions of the plugins' measuring code — their collectors — that the contract accepts: 8 on
-Android and 5 on iOS (`collector_version`), not Android 8 or iOS 5, the operating systems. Every
+folder's name is two versions: `report-1` is the report's format, version 1, and the rest the lowest
+versions of the plugins' measuring code — their collectors — that the contract accepts on each platform:
+on iOS 5 (`collector_version`), not iOS 5, the operating system. Every
 measurement and field is described in `measurements.md`, beside this guide; the tables below summarise
 them.
 
-Each entry in `probe_results` has a `status`: `ok`, `error` (with `error`, and on Android `error_type`),
+Each entry in `probe_results` has a `status`: `ok`, `error` (with `error`),
 `unsupported` (with `reason`), or `not_enabled` for a personal measurement this app does not collect.
 **A measurement counts only when its status is `ok` and its fields are there** — a status on its own is a
 claim. A field a plugin version does not know is absent; read absent as not measured. Besides what you
-ask for, every report carries `device` and `network`, and on iOS `code_integrity`.
+ask for, every report carries `device`, `network` and `code_integrity`.
 
 **An `ok` probe may carry `unread`**: the parts it could not read, each with why —
-`{"adb_enabled": "SecurityException", "/sbin/su": "SecurityException"}`. An unread part is not
-measured: never read it as a clean "no", and take a probe you required that carries one as not
-measured. A probe that could read nothing answers `error`. From plugin versions Android 8 and iOS 5
-(`collector_version`) no failed read is reported as a clean value; an older Android plugin could report
-one, and an older iOS plugin a partial comparison of the app's code as complete — refuse those versions,
-or keep their scans apart as older evidence.
+`{"image_names": "2 of 412 could not be read"}`. An unread part is not measured: never read it as a
+clean "no", and take a probe you required that carries one as not measured. A probe that could read
+nothing answers `error`. From collector version 5 (`collector_version`) no failed read is reported as a
+clean value; an older one could report a partial comparison of the app's code as complete — refuse those
+versions, or keep their scans apart as older evidence.
 
-### Android
-
-| Probe | What it tells you | Fields |
-|---|---|---|
-| `app_identity` | the installed app: package, the base APK's hash, the signing certificates, flags, install source; from version 8 the split APKs apart | `package_name`, `apk_sha256` (the base APK alone, never its splits), `cert_sha256` (list), `debuggable`, `allow_backup`, `version_name`, `version_code`, `installer_package`, `source_dir`, `current_signers`, `signing_lineage`, `split_apks` (each `name` and `sha256`, sorted by name; empty without splits) |
-| `debug_state` | a Java debugger attached or awaited | `debugger_connected`, `waiting_for_debugger` |
-| `tracer` | another process tracing the app | `tracer_pid`, `seccomp`, `no_new_privs` |
-| `root_files` | known root, su and framework paths that exist; a test-keys build | `found_paths`, `test_keys`, `build_tags` |
-| `root_shell` | whether `su` resolves from the app's shell | `su_found`, `su_path` |
-| `system_properties` | build and boot-security properties | `properties`: `ro.secure`, `ro.debuggable`, `ro.build.type`, `ro.build.tags`, `ro.boot.verifiedbootstate`, `ro.boot.flash.locked`, `ro.boot.vbmeta.device_state`, `ro.boot.veritymode` |
-| `selinux` | the SELinux mode, read two ways | `mode` (`enforcing`, `permissive`, `disabled`, `unknown`), `getenforce`, `enforce_value` |
-| `mounts` | system partitions mounted writable | `protected_rw_mounts` |
-| `runtime_maps` | instrumentation and hooking frameworks named in the app's memory map | `suspicious_tokens`, `suspicious_line_count`, `maps_lines` |
-| `frida_ports` | Frida's default local ports accepting connections | `open_ports` |
-| `instrumentation_threads` | threads an instrumentation runtime creates, even renamed | `frida_threads`, `glib_threads`, `token_threads`, `thread_count` |
-| `exec_mappings` | memory both writable and executable, executable memory from deleted files, unlabelled executable regions | `wx_mappings`, `wx_bytes`, `wx_size_classes`, `wx_smallest_bytes`, `wx_largest_bytes`, `deleted_exec_mappings`, `deleted_exec_own_code`, `deleted_exec_jit`, `anon_exec_labeled`, `anon_exec_unlabeled`, `anon_exec_unlabeled_bytes`, `maps_lines`, `samples` |
-| `code_integrity` | the app's native code and system libraries in memory compared with their files — an inline hook changes bytes | `checked`, `diff_bytes`, and for each region — the core system libraries, the extended ones, the app's own — its bytes compared, differing, expected, skipped and unreadable, and whether it is complete (`core_compared_bytes` to `app_complete`); `ext_libs_diff`, `app_libs_diff`, `diffed_libs`, `protect_restore_failures`, `elapsed_ms` |
-| `developer_settings` | developer options and USB debugging | `developer_options_enabled`, `adb_enabled` |
-| `emulator` | build values typical of an emulator | `suspected`, `reasons`, `model`, `manufacturer`, `product`, `hardware` |
-| `device` | the OS version, the security patch level, model, build, the app's ABI, memory page size | `release`, `sdk_int`, `security_patch`, `manufacturer`, `brand`, `model`, `device`, `build_id`, `fingerprint`, `abi`, `page_size` |
-| `network` | a VPN up on any network; an HTTP proxy set | `vpn_active`, `http_proxy_configured`, `transports`, `interfaces` (names only) |
-
-### iOS
+### The measurements
 
 | Probe | What it tells you | Fields |
 |---|---|---|
@@ -562,9 +530,6 @@ or keep their scans apart as older evidence.
 | `device` | the OS version and build, the model, the memory page size | `os_version`, `os_build`, `model_identifier`, `page_size` |
 | `network` | a VPN, inferred from the interfaces the proxy settings are scoped to — a heuristic, so the names come with it; an HTTP proxy | `vpn_active`, `http_proxy_configured`, `scoped_interfaces` |
 
-- **`apk_sha256` is the base APK's alone.** Installs of one release with different feature, ABI or
-  density splits share it; the splits are in `split_apks`. Pin and compare builds by the base hash, and
-  read the splits as what this install added.
 - **On iOS only the app's own code can be compared.** The system libraries live in a shared cache that
   no app can read: `system_images_unreadable` counts them, and their figures stay 0 — not measured, never
   clean. The app's coverage adds up — expected = compared + unreadable + skipped, for images and for
@@ -598,7 +563,7 @@ what your own server observed, where the requests come from, and what happened a
 ### 7.2 Your app as you built it: its files, its code, its size
 
 An app taken apart and rebuilt — with a hook, a cheat or an injected library — changes in size and in
-content from the app you released, and the plugin measures it three ways, each against what it should
+content from the app you released, and the plugin measures it two ways, each against what it should
 be. Nothing on the phone can prove that the app is yours (section 9); what you can do is know exactly
 what each release looks like, and refuse what does not look like it.
 
@@ -609,35 +574,18 @@ uploaded: a store may re-sign or slim the app for each kind of phone, so keep on
 record only from your own runs, never from the field, where the first modified copy would set what
 normal looks like.
 
-1. **The installed files** (`app_identity`). A single changed byte changes a hash.
-   - Android: the base APK's SHA-256 (`apk_sha256`); your signing certificate (`cert_sha256`,
-     `current_signers`) — a rebuilt app must be signed again, with a key that is not yours; each split
-     APK you ship and its hash (`split_apks`); and, where you distribute through a store, that store as
-     `installer_package`.
-   - iOS: the main executable's SHA-256 and its **size in bytes** (`executable_sha256`,
-     `executable_bytes`) — an executable with code added is larger; and your team identifier
-     (`team_identifier`, in `code_signing`).
+1. **The installed files** (`app_identity`). A single changed byte changes a hash: record the main
+   executable's SHA-256 and its **size in bytes** (`executable_sha256`, `executable_bytes`) — an
+   executable with code added is larger — and your team identifier (`team_identifier`, in
+   `code_signing`).
 
    A report whose files match no release of yours is not your app as you built it.
 2. **The code in memory** (`code_integrity`). The plugin compares the app's code as it runs with the
-   code in its installed files: every byte that differs (`app_diff_bytes`, and on Android the system
-   libraries' too) is code changed while running, which should never happen. Its **size** tells you
-   what was loaded: on iOS `app_images_expected` counts the app's own images in memory and
-   `app_expected_bytes` their code — an injected library is one image more and its code more than your
-   release ever loads; on Android `app_expected_bytes` is the app's own native code in memory. Compare
-   both with your release's record. A comparison short of complete measured only part of the code.
-3. **The memory around it** (`exec_mappings`, on Android). Code loaded at run time needs executable
-   memory: memory both writable and executable (`wx_bytes`, `wx_size_classes`, `wx_largest_bytes`) and
-   executable regions with no file behind them (`anon_exec_unlabeled_bytes`). Some runtimes compile
-   code as they run and map some of each — one that compiles each method the first time it runs, say.
-   Such a runtime shows itself by how it grows: it maps more as more of the app is used, keeps it
-   while the app runs, and maps it in blocks of one size (64 KiB on the phones measured; your own runs
-   show yours). Record the most of each your release maps, per OS version, processor and page size,
-   **over whole sessions through your app's main features, not at a cold start** — or a genuine
-   customer who signs in and approves a request maps more than your record. **More than your app ever
-   maps, or a size that is not a whole number of its runtime's blocks, is code in it that you did not
-   ship.** That tells a runtime's own code from a tool's; it does not prove a hook absent — one can
-   allocate in the same blocks — so the code comparison above is the stronger evidence.
+   code in its installed files: every byte that differs (`app_diff_bytes`) is code changed while
+   running, which should never happen. Its **size** tells you what was loaded: `app_images_expected`
+   counts the app's own images in memory and `app_expected_bytes` their code — an injected library is
+   one image more and its code more than your release ever loads. Compare both with your release's
+   record. A comparison short of complete measured only part of the code.
 
 Compare a phone with itself too: the same installation reporting other hashes without an update, or an
 older build than before, is an app that changed under it.
@@ -727,27 +675,23 @@ These identify a person's phone, network or habits, so they need two keys: your 
 `not_enabled`. The location needs the person's permission as well, which the plugin asks for only when
 your app asks.
 
-| Probe | What it tells you | Fields | Platforms |
-|---|---|---|---|
-| `local_addresses` | the phone's own IP addresses, link-local ones left out | `addresses` (`interface`, `address`) | both |
-| `accessibility` | the Accessibility services that are on, and the keyboard in use | `services`, `keyboard`, `settings_only`, `truncated` | Android |
-| `notification_access` | the apps allowed to read notifications, one-time codes among them | `listeners`, `truncated` | Android |
-| `other_access` | device-administrator apps, and known remote-control apps installed | `device_admins`, `remote_access_apps`, `truncated` | Android |
-| `screen_capture` | the screen being recorded, mirrored or cast | `recording`, `external_displays`, `recording_status` | both |
-| `location` | the last location the phone already knows — never a fresh fix, never a prompt | `permission` (`precise`, `approximate`, `none`), `latitude`, `longitude`, `accuracy_m`, `age_seconds`, `fix_time`; Android also `provider` | both |
-| `mock_location` | whether that location was faked | `permission`, `mock`, `age_seconds`, `fix_time`; iOS also `accessory` | both |
+| Probe | What it tells you | Fields |
+|---|---|---|
+| `local_addresses` | the phone's own IP addresses, link-local ones left out | `addresses` (`interface`, `address`), `truncated` |
+| `accessibility` | the Accessibility services that are on, and the keyboard in use | none: `unsupported` (below) |
+| `notification_access` | the apps allowed to read notifications | none: `unsupported` |
+| `other_access` | device-administrator apps, and known remote-control apps installed | none: `unsupported` |
+| `screen_capture` | the screen being recorded, mirrored or cast | `recording`, `external_displays`, `recording_status` |
+| `location` | the last location the phone already knows — never a fresh fix, never a prompt | `permission` (`precise`, `approximate`, `none`), `latitude`, `longitude`, `accuracy_m`, `age_seconds`, `fix_time` |
+| `mock_location` | whether that location was faked | `permission`, `mock`, `accessory`, `age_seconds`, `fix_time` |
 
-- A list of apps holds at most 32, each with `package` and `service`, and with `system` and `installer`
-  where Android lets the app see them; `truncated` is true when the phone had more.
-- `recording` exists on Android from Android 15, and on iOS while the app has a window in the
-  foreground; when it is missing, `recording_status` says why (`unsupported`, `no_permission`,
-  `unavailable` — from iOS only `unavailable`).
+- `recording` is there while the app has a window in the foreground; when it is missing,
+  `recording_status` says why: `unavailable`.
 - iOS shows an app no other app: `accessibility`, `notification_access` and `other_access` answer
-  `unsupported` there.
-- From plugin versions Android 8 and iOS 5 both location answers describe one fix, read once per scan,
-  and carry its time, `fix_time` (Unix seconds): two different times are two observations, not one.
-  Asking for `mock_location` alone never sends coordinates. On Android a location source the plugin
-  could not read is in `unread`: then no coordinates do not mean that the phone knows no location.
+  `unsupported`.
+- From collector version 5 both location answers describe one fix, read once per scan, and carry its
+  time, `fix_time` (Unix seconds): two different times are two observations, not one. Asking for
+  `mock_location` alone never sends coordinates.
 - On iOS, `mock` is Apple's own flag. On an iPhone with iOS 15.8, a location faked with Apple's
   developer tools was flagged on the first scan; third-party spoofing apps have not been tested, and Apple
   does not promise to flag them. `accessory` marks a location from an external GPS accessory.

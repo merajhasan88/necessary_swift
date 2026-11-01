@@ -64,11 +64,8 @@ jobs:
             exit 1
           }
           grep -E 'Executed [0-9]+ tests?|Test Suite .* (passed|failed)' test.log | tail -5
-          # The counts, where a run's summary shows them.
-          echo "::notice::Simulator $DEVICE, scheme $SCHEME"
-          grep -E "Test Suite '[A-Za-z]+Tests' (passed|failed)|Executed [0-9]+ tests?" test.log | sed 's/^[[:space:]]*//' | uniq | tail -14 | while IFS= read -r line; do
-            echo "::notice::$line"
-          done
+          # The count, where a run's summary shows it.
+          echo "::notice::$(xcodebuild -version | head -1), simulator $DEVICE: $(grep -E 'Executed [0-9]+ tests?' test.log | tail -1 | sed 's/^[[:space:]]*//')"
 
   example:
     name: The example app, unsigned
