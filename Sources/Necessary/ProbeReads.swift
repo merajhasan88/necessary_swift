@@ -1,0 +1,353 @@
+import Foundation
+
+/// What the iOS collector makes of what it read: pure functions with no
+/// Apple-only framework in them, so they compile and can be tested on any
+/// Swift toolchain - the counterpart of
+/// the Android collector's reads. The collector reads Mach-O headers, files and
+/// Core Location; these decide what the reads mean.
+enum ProbeReads {
+
+    // MARK: - App-code coverage
+
+    /// The largest __TEXT segment read from disk for one comparison.
+    static let maxTextSegment: UInt64 = 64 * 1024 * 1024
+    /// Images not compared that are named, at most (the server's list bound).
+    static let maxNamedImages = 64
+
+    /// Where an image's __text lies, as its load commands state it.
+    struct TextSpan: Equatable {
+        /// The whole __TEXT segment: its file offset and size, and where it
+        /// is mapped before the image's slide.
+        let segmentFileOffset: Int
+        let segmentSize: Int
+        let segmentVMAddress: UInt64
+        /// The __text section inside that segment: only this range is scored.
+        let textOffsetInSegment: Int
+        let textSize: Int
+    }
+
+    /// Why one app image's __text was not compared, and how many __text bytes
+    /// that leaves out: 0 when its size could not be read.
+    struct CoverageProblem: Error, Equatable {
+        let reason: String
+        let textSize: Int
+    }
+
+    /// The __text section of a __TEXT segment, or why it cannot be compared.
+    /// The section is checked before the segment's budget is applied, so an
+    /// image over the budget is skipped with its size rather than dropped
+    /// unseen; the header's unsigned values are checked before any becomes an
+    /// Int. `section` is nil when the segment names no __text.
+    static func textSpan(
+        segmentFileOffset fileOffset: UInt64,
+        segmentFileSize fileSize: UInt64,
+        segmentVMAddress: UInt64,
+        section: (offset: UInt64, size: UInt64)?
+    ) -> Result<TextSpan, CoverageProblem> {
+        guard let section = section else {
+            return .failure(CoverageProblem(reason: "no __text section in __TEXT", textSize: 0))
+        }
+        let size = section.size
+        guard size > 0 else {
+            return .failure(CoverageProblem(reason: "an empty __text section", textSize: 0))
+        }
+        guard section.offset >= fileOffset, size <= fileSize,
+              section.offset - fileOffset <= fileSize - size else {
+            return .failure(CoverageProblem(reason: "__text lies outside its __TEXT segment", textSize: 0))
+        }
+        guard fileSize <= maxTextSegment else {
+            return .failure(CoverageProblem(
+                reason: "__TEXT of \(fileSize) bytes is over the 64 MiB budget",
+                textSize: size <= 1 << 40 ? Int(size) : 0))
+        }
+        return .success(TextSpan(
+            segmentFileOffset: Int(clamping: fileOffset),
+            segmentSize: Int(fileSize),
+            segmentVMAddress: segmentVMAddress,
+            textOffsetInSegment: Int(section.offset - fileOffset),
+            textSize: Int(size)
+        ))
+    }
+
+    /// Whether an image's encryption keeps its __text from being compared, or
+    /// nil. The App Store encrypts an app's code on disk (LC_ENCRYPTION_INFO_64,
+    /// `cryptid` 1) and iOS decrypts it as it maps it, so a genuine image's file
+    /// and memory differ in every encrypted byte. An encrypted range that
+    /// overlaps __text makes the image one that cannot be compared: skipped,
+    /// with its __text bytes -- never compared, never clean. Offsets are the
+    /// file's, as `span`'s are; `cryptid` 0 is an image stored in the clear.
+    static func encryptionProblem(
+        cryptOffset: UInt32, cryptSize: UInt32, cryptID: UInt32, span: TextSpan
+    ) -> CoverageProblem? {
+        guard cryptID != 0, cryptSize > 0 else { return nil }
+        let textStart = UInt64(span.segmentFileOffset) + UInt64(span.textOffsetInSegment)
+        let textEnd = textStart + UInt64(span.textSize)
+        let cryptStart = UInt64(cryptOffset)
+        let cryptEnd = cryptStart + UInt64(cryptSize)
+        guard cryptStart < textEnd, textStart < cryptEnd else { return nil }
+        return CoverageProblem(
+            reason: "encrypted on disk (App Store): its code cannot be compared with its file",
+            textSize: span.textSize)
+    }
+
+    /// Why a read of `wanted` bytes is not the whole of them, or nil: a short
+    /// read is unreadable, never a comparison of part.
+    static func readProblem(got: Int, wanted: Int) -> String? {
+        return got == wanted ? nil : "unreadable: \(got) of \(wanted) bytes read"
+    }
+
+    /// Where the arm64 image starts in its file: 0 when the file is a 64-bit
+    /// Mach-O image; the arm64 slice's offset in a universal ("fat") file, the
+    /// form a build keeps its frameworks in when nothing thinned them (an ad
+    /// hoc or enterprise install, say); nil when it is neither. The image's own
+    /// offsets count from there, never from the file's start.
+    static func arm64Slice(_ head: [UInt8]) -> Int? {
+        func big(_ at: Int) -> Int? {
+            guard at + 4 <= head.count else { return nil }
+            return Int(head[at]) << 24 | Int(head[at + 1]) << 16 | Int(head[at + 2]) << 8 | Int(head[at + 3])
+        }
+        guard head.count >= 8 else { return nil }
+        let little = Int(head[0]) | Int(head[1]) << 8 | Int(head[2]) << 16 | Int(head[3]) << 24
+        if little == 0xfeed_facf { return 0 }
+        guard big(0) == 0xcafe_babe, let count = big(4), count < 64 else { return nil }
+        for index in 0..<count {
+            guard let cpu = big(8 + index * 20), let offset = big(8 + index * 20 + 8) else { return nil }
+            if cpu == 0x0100_000c { return offset }  // CPU_TYPE_ARM64
+        }
+        return nil
+    }
+
+    /// The LC_UUID of a 64-bit Mach-O image, from its header and load commands
+    /// as read from its file, or nil when they hold none or cannot be walked.
+    static func machOUUID(_ bytes: [UInt8]) -> [UInt8]? {
+        func word(_ at: Int) -> Int {
+            Int(bytes[at]) | Int(bytes[at + 1]) << 8 | Int(bytes[at + 2]) << 16 | Int(bytes[at + 3]) << 24
+        }
+        guard bytes.count >= 32, word(0) == 0xfeed_facf else { return nil }
+        var offset = 32
+        for _ in 0..<word(16) {
+            guard offset + 8 <= bytes.count else { return nil }
+            let command = word(offset), size = word(offset + 4)
+            guard size >= 8, offset + size <= bytes.count else { return nil }
+            if command == 0x1b {  // LC_UUID
+                return size >= 24 ? Array(bytes[(offset + 8)..<(offset + 24)]) : nil
+            }
+            offset += size
+        }
+        return nil
+    }
+
+    /// Whether the file on disk is the build that was loaded: its LC_UUID
+    /// against the loaded image's. An app updated while it ran -- TrollStore
+    /// installs over a running app, an in-place update, a development install --
+    /// runs the old code with the new file on disk, and the two then differ in
+    /// many bytes nobody changed: such an image is skipped with its __text
+    /// bytes, never compared. Nil when they match, or the loaded image has no
+    /// LC_UUID to tell by.
+    static func buildProblem(loaded: [UInt8]?, onDisk: [UInt8]?, textSize: Int) -> CoverageProblem? {
+        guard let loaded = loaded, loaded != onDisk else { return nil }
+        return CoverageProblem(
+            reason: "another build on disk than the one running (LC_UUID differs): the app was updated while it ran",
+            textSize: textSize)
+    }
+
+    /// An image dyld counts but gives no name or header for (it is being
+    /// unloaded as the list is walked): never dropped unsaid. It may be the
+    /// app's, so it is an app image that could not be read, with no bytes.
+    static func unlistedImage(index: Int) -> AppImage {
+        AppImage(path: "image \(index)", isMainExecutable: false,
+                 outcome: .unreadable(textBytes: 0, why: "dyld gave no name or header for it"))
+    }
+
+    /// The images whose names dyld did not give, as `unread` says it: never a
+    /// shorter list read as all of them.
+    static func unnamedImages(_ missing: Int, of total: Int) -> [String: String] {
+        missing > 0 ? ["image_names": "\(missing) of \(total) could not be read"] : [:]
+    }
+
+    /// How one app image's comparison ended.
+    enum ImageOutcome: Equatable {
+        /// Compared: its __text bytes and how many differ, and the same for
+        /// the whole __TEXT segment (telemetry).
+        case compared(textBytes: Int, textDiffering: Int, segmentBytes: Int, segmentDiffering: Int)
+        /// Its file could not be read in full.
+        case unreadable(textBytes: Int, why: String)
+        /// Not compared: no usable __text, a __TEXT over the budget, no live
+        /// address. Its __text bytes when known, else 0.
+        case skipped(textBytes: Int, why: String)
+    }
+
+    /// One image the loader mapped from the app's bundle.
+    struct AppImage: Equatable {
+        /// Its path in the bundle (bundleLabel).
+        let path: String
+        let isMainExecutable: Bool
+        let outcome: ImageOutcome
+    }
+
+    /// An image's path in the bundle, as the report names it: at most 128
+    /// characters, its end kept; "(bundle)" for the bundle itself.
+    static func bundleLabel(imagePath: String, bundlePath: String) -> String {
+        let inBundle = String(imagePath.dropFirst(bundlePath.count).drop(while: { $0 == "/" }))
+        return inBundle.isEmpty ? "(bundle)" : String(inBundle.suffix(128))
+    }
+
+    /// The app bucket's figures from every bundle image's outcome (collector
+    /// 5): every image expected, and each compared, unreadable or skipped,
+    /// with its __text bytes; each one not compared named with why; complete
+    /// only when every image was compared - the images decide, since one
+    /// whose size could not be read adds no bytes. `checked` means the app
+    /// bucket was genuinely compared: not one image, nothing measured.
+    static func appCoverage(_ images: [AppImage], systemImagesUnreadable: Int) -> [String: Any] {
+        var compared = 0, unreadable = 0, skipped = 0
+        var expectedBytes = 0, comparedBytes = 0, unreadableBytes = 0, skippedBytes = 0
+        var differing = 0, imagesDiffering = 0, segmentCompared = 0, segmentDiffering = 0
+        var diffed: [String] = []
+        var notCompared: [String: String] = [:]
+        var mainCompared = false
+
+        func name(_ image: AppImage, _ why: String) {
+            if notCompared.count < maxNamedImages {
+                notCompared[image.path] = String(why.prefix(160))
+            }
+        }
+
+        for image in images {
+            switch image.outcome {
+            case let .compared(textBytes, textDiffering, segmentBytes, segmentDiff):
+                compared += 1
+                expectedBytes += textBytes
+                comparedBytes += textBytes
+                segmentCompared += segmentBytes
+                segmentDiffering += segmentDiff
+                if image.isMainExecutable { mainCompared = true }
+                if textDiffering > 0 {
+                    differing += textDiffering
+                    imagesDiffering += 1
+                    diffed.append(image.path.split(separator: "/").last.map(String.init) ?? image.path)
+                }
+            case let .unreadable(textBytes, why):
+                unreadable += 1
+                expectedBytes += textBytes
+                unreadableBytes += textBytes
+                name(image, why)
+            case let .skipped(textBytes, why):
+                skipped += 1
+                expectedBytes += textBytes
+                skippedBytes += textBytes
+                name(image, why)
+            }
+        }
+
+        var result: [String: Any] = [
+            "checked": compared > 0,
+            "app_compared_bytes": comparedBytes,
+            "app_diff_bytes": differing,
+            "app_libs_diff": imagesDiffering,
+            "app_images_compared": compared,
+            "system_images_unreadable": systemImagesUnreadable,
+            "app_images_expected": images.count,
+            "app_images_unreadable": unreadable,
+            "app_images_skipped": skipped,
+            "app_expected_bytes": expectedBytes,
+            "app_unreadable_bytes": unreadableBytes,
+            "app_skipped_bytes": skippedBytes,
+            "app_complete": !images.isEmpty && compared == images.count,
+            "main_executable_compared": mainCompared,
+            // Telemetry only. Never scored until it has a hardware baseline.
+            "app_segment_compared_bytes": segmentCompared,
+            "app_segment_diff_bytes": segmentDiffering,
+            "diffed_libs": diffed.joined(separator: ","),
+        ]
+        if !notCompared.isEmpty {
+            result["app_images_not_compared"] = notCompared
+        }
+        return result
+    }
+
+    // MARK: - One location read per collection
+
+    /// One fix as the collector captured it from Core Location.
+    struct Fix: Equatable {
+        let latitude: Double
+        let longitude: Double
+        /// Negative when unknown, as Core Location reports it.
+        let horizontalAccuracy: Double
+        let timestamp: Date
+        /// From iOS 15, where the fix says; nil where it cannot.
+        let simulatedBySoftware: Bool?
+        let producedByAccessory: Bool?
+    }
+
+    /// One location read: the permission, the fix the phone already held -
+    /// none without the permission - and its age when read.
+    struct LocationRead: Equatable {
+        let permission: String
+        let fix: Fix?
+        let ageSeconds: Int
+    }
+
+    static func read(permission: String, fix: Fix?, now: Date) -> LocationRead {
+        let held = permission == "none" ? nil : fix
+        let age = held.map { max(0, Int(now.timeIntervalSince($0.timestamp))) } ?? 0
+        return LocationRead(permission: permission, fix: held, ageSeconds: age)
+    }
+
+    /// The collection's one location read: made on first use and never again,
+    /// so the coordinates and the mock flag describe one fix. Each collection
+    /// makes its own.
+    final class LocationCapture {
+        private let read: () -> LocationRead
+        private var made: LocationRead?
+
+        init(_ read: @escaping () -> LocationRead) {
+            self.read = read
+        }
+
+        var value: LocationRead {
+            if let made = made { return made }
+            let fresh = self.read()
+            made = fresh
+            return fresh
+        }
+    }
+
+    /// The last known location: the coordinates of the read's fix.
+    static func location(_ read: LocationRead) -> [String: Any] {
+        var result: [String: Any] = ["status": "ok", "permission": read.permission]
+        guard let fix = read.fix else { return result }
+        result["latitude"] = fix.latitude
+        result["longitude"] = fix.longitude
+        if fix.horizontalAccuracy >= 0 { result["accuracy_m"] = fix.horizontalAccuracy }
+        result["age_seconds"] = read.ageSeconds
+        result["fix_time"] = Int(fix.timestamp.timeIntervalSince1970)
+        return result
+    }
+
+    /// Whether the read's fix was simulated by software or produced by an
+    /// accessory: never its coordinates. Before iOS 15 the fix cannot say.
+    static func mockLocation(_ read: LocationRead) -> [String: Any] {
+        var result: [String: Any] = ["status": "ok", "permission": read.permission]
+        guard let fix = read.fix else { return result }
+        if let simulated = fix.simulatedBySoftware { result["mock"] = simulated }
+        if let accessory = fix.producedByAccessory { result["accessory"] = accessory }
+        result["age_seconds"] = read.ageSeconds
+        result["fix_time"] = Int(fix.timestamp.timeIntervalSince1970)
+        return result
+    }
+
+    /// Screen capture (collector 6): `recording` when a screen showing the
+    /// app's window could be asked. With none - the app in the background, or
+    /// before its first window - recording is not measured, never "no", and
+    /// `recording_status` says why: `unavailable`, as on Android with no window
+    /// to ask. The other screens attached are counted either way.
+    static func screenCapture(captured: Bool?, otherScreens: Int) -> [String: Any] {
+        var result: [String: Any] = ["status": "ok", "external_displays": max(0, otherScreens)]
+        if let captured = captured {
+            result["recording"] = captured
+        } else {
+            result["recording_status"] = "unavailable"
+        }
+        return result
+    }
+}

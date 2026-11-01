@@ -1,0 +1,16 @@
+.DS_Store
+.build/
+.swiftpm/
+/Package.resolved
+DerivedData/
+xcuserdata/
+*.xcuserstate
+build/
+Example/NecessaryExample.xcodeproj/
+Example/Info.plist
+*.ipa
+backend/typescript/node_modules/
+backend/typescript/dist/
+backend/csharp/bin/
+backend/csharp/obj/
+__pycache__/

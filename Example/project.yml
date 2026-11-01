@@ -1,0 +1,62 @@
+# The example app's Xcode project, made by XcodeGen (https://github.com/yonaskolb/XcodeGen):
+#
+#     brew install xcodegen && xcodegen generate
+#
+# then open NecessaryExample.xcodeproj. The backends the app offers come from the build settings
+# NECESSARY_BACKENDS ("Python=https://…;TypeScript=https://…") or NECESSARY_BACKEND_URL (one backend).
+name: NecessaryExample
+options:
+  deploymentTarget:
+    iOS: "15.0"
+  createIntermediateGroups: true
+packages:
+  Necessary:
+    path: ..
+targets:
+  NecessaryExample:
+    type: application
+    platform: iOS
+    sources:
+      - Sources
+    dependencies:
+      - package: Necessary
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: Necessary
+        CFBundleShortVersionString: $(MARKETING_VERSION)
+        CFBundleVersion: $(CURRENT_PROJECT_VERSION)
+        UILaunchScreen: {}
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+          - UIInterfaceOrientationLandscapeLeft
+          - UIInterfaceOrientationLandscapeRight
+        NecessaryBackends: $(NECESSARY_BACKENDS)
+        NecessaryBackendURL: $(NECESSARY_BACKEND_URL)
+        NSLocationWhenInUseUsageDescription: The location measurements report the last location this iPhone already knows.
+        NSFaceIDUsageDescription: Face ID approves requests when biometric step-up is on.
+        NSLocalNetworkUsageDescription: The example talks to a sample backend on your network.
+        NSAppTransportSecurity:
+          # A sample backend on the local network, over plain HTTP, for a debug build.
+          NSAllowsLocalNetworking: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.necessarysdk.example
+        PRODUCT_NAME: NecessaryExample
+        MARKETING_VERSION: "0.1.5"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        NECESSARY_BACKENDS: ""
+        NECESSARY_BACKEND_URL: "http://127.0.0.1:8787"
+schemes:
+  NecessaryExample:
+    build:
+      targets:
+        NecessaryExample: all
+    run:
+      config: Debug
+    archive:
+      config: Release

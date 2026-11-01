@@ -1,0 +1,119 @@
+# The package's tests on the iOS Simulator, and the example app built for a phone, unsigned.
+#
+#   * Tests: every test of Tests/NecessaryTests, on the newest iPhone simulator the runner has.
+#   * The example: Example/project.yml made into an Xcode project by XcodeGen, built for a device
+#     without code signing, and packaged by hand as an .ipa (an .ipa is a zip with the bundle under
+#     Payload/), kept as the run's artifact for seven days. Sign it yourself, or install it on a phone
+#     that installs unsigned builds.
+#
+# The backends the example offers: the input of a run started by hand, or the repository variable
+# NECESSARY_BACKENDS ("Python=https://…;TypeScript=https://…"); with neither, the simulator's own
+# http://127.0.0.1:8787.
+name: iOS
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      backends:
+        description: 'The example''s backends: Name=https://…;Other=https://…'
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    name: Tests on the iOS Simulator
+    runs-on: macos-15
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Xcode and the simulators
+        run: |
+          xcodebuild -version
+          xcrun simctl list devices available | grep -E 'iPhone' | head -20
+
+      - name: Test
+        run: |
+          set -o pipefail
+          DEVICE=$(xcrun simctl list devices available -j | python3 -c '
+          import json, sys
+          runtimes = json.load(sys.stdin)["devices"]
+          ios = sorted((k for k in runtimes if "iOS" in k), key=lambda k: [int(p) for p in k.split("iOS-")[-1].split("-")])
+          for runtime in reversed(ios):
+              phones = [d for d in runtimes[runtime] if d["name"].startswith("iPhone")]
+              if phones:
+                  print(phones[-1]["udid"]); break
+          ')
+          echo "Simulator: $DEVICE"
+          SCHEME=$(xcodebuild -list -json | python3 -c '
+          import json, sys
+          schemes = json.load(sys.stdin).get("workspace", {}).get("schemes", [])
+          print(next((s for s in schemes if s.endswith("-Package")), "Necessary"))
+          ')
+          echo "Scheme: $SCHEME"
+          xcodebuild test -scheme "$SCHEME" -destination "id=$DEVICE" 2>&1 | tee test.log || {
+            grep -E ': (error|fatal error):|XCTAssert|Test Case .* failed' test.log | head -60 | while IFS= read -r line; do
+              echo "::error::${line//%/%25}"
+            done
+            exit 1
+          }
+          grep -E 'Executed [0-9]+ tests?|Test Suite .* (passed|failed)' test.log | tail -5
+
+  example:
+    name: The example app, unsigned
+    runs-on: macos-15
+    timeout-minutes: 45
+    env:
+      BACKENDS: ${{ inputs.backends || vars.NECESSARY_BACKENDS || '' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: XcodeGen
+        run: brew install xcodegen
+
+      - name: The Xcode project
+        working-directory: Example
+        run: xcodegen generate
+
+      - name: Build for a device without code signing
+        run: |
+          set -o pipefail
+          xcodebuild build \
+            -project Example/NecessaryExample.xcodeproj -scheme NecessaryExample \
+            -configuration Release -sdk iphoneos -destination 'generic/platform=iOS' \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            NECESSARY_BACKENDS="$BACKENDS" 2>&1 | tee build.log || {
+            grep -E ': (error|fatal error):' build.log | head -60 | while IFS= read -r line; do
+              echo "::error::${line//%/%25}"
+            done
+            exit 1
+          }
+
+      - name: Package the app as an unsigned .ipa
+        run: |
+          set -e
+          APP=build/Build/Products/Release-iphoneos/NecessaryExample.app
+          test -d "$APP" || { echo "::error::NecessaryExample.app not found at $APP"; exit 1; }
+          # The backends are in the app; how many characters, not what they are.
+          echo "NecessaryBackends: $(/usr/libexec/PlistBuddy -c 'Print :NecessaryBackends' "$APP/Info.plist" | tr -d '\n' | wc -c | tr -d ' ') characters"
+          rm -rf ipa && mkdir -p ipa/Payload
+          cp -R "$APP" ipa/Payload/
+          (cd ipa && zip -qry ../NecessaryExample-unsigned.ipa Payload)
+          ls -lh NecessaryExample-unsigned.ipa
+          shasum -a 256 NecessaryExample-unsigned.ipa | tee NecessaryExample-unsigned.ipa.sha256
+          echo "::notice::NecessaryExample-unsigned.ipa $(cut -d' ' -f1 NecessaryExample-unsigned.ipa.sha256)"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: NecessaryExample-unsigned
+          path: |
+            NecessaryExample-unsigned.ipa
+            NecessaryExample-unsigned.ipa.sha256
+          retention-days: 7
