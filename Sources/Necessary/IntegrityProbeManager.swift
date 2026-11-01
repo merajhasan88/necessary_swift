@@ -13,14 +13,14 @@ import UIKit
 /// device an attacker may be able to lie about local state. The server scores
 /// these raw measurements together with server-observed behaviour and never
 /// trusts a client-provided score - the collector deliberately computes no
-/// score of its own, exactly like the Android collector.
+/// score of its own.
 ///
 /// The probe names and every field name below are a hard contract with the
 /// published measurement contract and every backend reading it. Renaming a
 /// field silently disables the rule that reads it.
 final class IntegrityProbeManager {
     /// Per-platform numbering. 1 was the baseline probe set; 2 adds
-    /// `code_integrity`, the dyld analogue of Android's native probe. 3
+    /// `code_integrity`, the comparison of the app's code in memory with its file. 3
     /// volunteers `device` and `network` on every scan and answers the
     /// optional measurements the server asks for. 4 adds screen capture,
     /// location and mock locations, and the OS build. 5 reports the app's code
@@ -30,7 +30,7 @@ final class IntegrityProbeManager {
     /// its fix_time. 6 sends the memory page size with `device`, and asks
     /// screen capture of the screen showing the app: with no window scene in
     /// the foreground, recording is not measured and `recording_status` says
-    /// `unavailable`, as on Android.
+    /// `unavailable`.
     /// What the reads mean - the coverage tally, the text span's checks, the
     /// one location read - is in ProbeReads.swift, which needs no Apple-only
     /// framework and so can be tested on any Swift toolchain.
@@ -355,8 +355,8 @@ final class IntegrityProbeManager {
     /// told at launch, and it degrades honestly: a TrollStore-installed
     /// unsigned build carries no LC_CODE_SIGNATURE at all, which is reported as
     /// signed=false instead of being mistaken for a clean signed app. That is
-    /// the same class of trap as an Android integrity bucket reporting
-    /// compared_bytes=0 and reading as clean.
+    /// the same class of trap as a comparison reporting compared_bytes=0 and
+    /// reading as clean.
     ///
     /// signing_identifier / team_identifier / get_task_allow are fixed by the
     /// measurement contract. The remaining fields are additive.
@@ -399,13 +399,12 @@ final class IntegrityProbeManager {
     // MARK: - Code integrity
 
     /// Compares each loaded image's `__TEXT,__text` in memory against the same
-    /// bytes on disk. This is the iOS analogue of Android's native
-    /// `code_integrity`, and its field names, the same on both platforms, are
-    /// fixed by the measurement contract.
+    /// bytes on disk. Its field names are fixed by the measurement contract,
+    /// the same on every platform.
     ///
     /// **Only the app bucket can be measured on iOS, and that is a platform
-    /// fact rather than an omission.** Android compares libc and libart
-    /// against `/apex/.../libc.so`, real files with real bytes. iOS system
+    /// fact rather than an omission.** A system library elsewhere is a real
+    /// file with real bytes to compare. iOS system
     /// libraries do not exist as individual files: dyld combines them into the
     /// shared cache, so there is nothing to `open()` for UIKit or libobjc.
     /// Those images are therefore counted as *unreadable*, never as clean.
@@ -551,9 +550,8 @@ final class IntegrityProbeManager {
         // remainder - the Mach-O header, __stubs, __cstring, __unwind_info -
         // is reported separately because it has no clean baseline yet. If it
         // measures zero on hardware, the header's unused mach_header_64
-        // .reserved field becomes a safe flip target, the direct analogue of
-        // the ELF EI_PAD bytes used to close the app bucket on Android.
-        // Until then it must not influence a verdict.
+        // .reserved field becomes a safe flip target for proving the bucket
+        // on a device. Until then it must not influence a verdict.
         var textDiffering = 0
         var segmentDiffering = 0
         onDisk.withUnsafeBytes { (diskBytes: UnsafeRawBufferPointer) in

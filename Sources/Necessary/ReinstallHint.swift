@@ -40,12 +40,9 @@ open class ReinstallHintReader {
     }
 
     open func read() async -> ReinstallHint? {
-        let kind: String
-        switch platform {
-        case "android": kind = "android_id"
-        case "ios": kind = "idfv"
-        default: return nil
-        }
+        // The identifier for vendor; on any other platform, no hint.
+        guard platform == "ios" else { return nil }
+        let kind = "idfv"
         let value = (await identifier() ?? "").trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         // A missing hint never stops the installation's cryptographic identity.
         guard !value.isEmpty else { return nil }

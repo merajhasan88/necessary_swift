@@ -148,7 +148,7 @@ struct TrustView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     if backends.count > 1 {
                         Picker("Backend", selection: Binding(get: { model.backend }, set: { model.choose($0) })) {
-                            ForEach(backends, id: \.name) { Text($0.name).tag($0.name) }
+                            ForEach(backends) { Text($0.name).tag($0.name) }
                         }
                         .pickerStyle(.segmented)
                         .disabled(model.busy)
@@ -316,7 +316,10 @@ struct TrustView: View {
             .keyboardType(.numberPad)
             .focused($secret, equals: .pin)
             .textFieldStyle(.roundedBorder)
-            .onChange(of: pin) { typed in if typed.count > 6 { pin = String(typed.prefix(6)) } }
+            .onChange(of: pin) { typed in
+                guard typed.count > 6 else { return }
+                pin = String(typed.prefix(6))
+            }
         note("The screen is covered while it is typed, if it is recorded")
         actions {
             button("Requests", "Set the app PIN", enabled: model.signedIn) {
@@ -388,7 +391,8 @@ struct TrustView: View {
     }
 
     private func actions<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        FlowLayout { content() }.padding(.vertical, 4)
+        // A column of buttons, each wrapping its text: it reads the same on every width.
+        VStack(alignment: .leading, spacing: 6) { content() }.padding(.vertical, 4)
     }
 
     @ViewBuilder private func latestLine(_ section: String) -> some View {
@@ -452,17 +456,6 @@ struct CardSection<Content: View>: View {
         }
         .padding(12)
         .background(RoundedRectangle(cornerRadius: 12).fill(Color(UIColor.secondarySystemBackground).opacity(0.5)))
-    }
-}
-
-/// Buttons in rows, as many to a row as fit.
-struct FlowLayout<Content: View>: View {
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        // iOS 15 has no Layout protocol: a vertical stack of buttons that wrap their text reads the
-        // same on every width.
-        VStack(alignment: .leading, spacing: 6) { content() }
     }
 }
 

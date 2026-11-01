@@ -91,7 +91,7 @@ dotnet bin/Release/net10.0/SampleBackend.dll --port 8787 --schema <contract>/rep
 
 `run_e2e.sh` starts a sample with its test controls and a token of its own, runs the SDK's end-to-end
 test (`Tests/NecessaryTests/BackendEndToEndTests.swift`) against it on the iOS Simulator — real HTTP, real
-P-256 signatures, the contract's Android samples as the phone's measurements, and every sample of the
+P-256 signatures, the contract's iOS samples as the phone's measurements, and every sample of the
 contract judged as it says — and stops it. It needs a Mac with Xcode. Against a deployed sample, set
 `NECESSARY_BACKEND_URL` alone and run the test: the tests that need the controls are skipped.
 

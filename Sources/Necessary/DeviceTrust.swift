@@ -269,7 +269,7 @@ public final class DeviceTrust {
             do {
                 try await stepUpKey.deleteKey()
             } catch let error as NativeKeyError {
-                if error.code != "NATIVE_STEPUP_PLUGIN_MISSING" && error.code != "UNSUPPORTED_ANDROID_VERSION" {
+                if error.code != "NATIVE_STEPUP_PLUGIN_MISSING" {
                     throw NativeKeyError(
                         error.code,
                         "The installation was reset, but its step-up key could not be deleted: "

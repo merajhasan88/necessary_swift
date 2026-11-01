@@ -2,8 +2,7 @@ import Foundation
 
 /// What the iOS collector makes of what it read: pure functions with no
 /// Apple-only framework in them, so they compile and can be tested on any
-/// Swift toolchain - the counterpart of
-/// the Android collector's reads. The collector reads Mach-O headers, files and
+/// Swift toolchain. The collector reads Mach-O headers, files and
 /// Core Location; these decide what the reads mean.
 enum ProbeReads {
 
@@ -339,8 +338,8 @@ enum ProbeReads {
     /// Screen capture (collector 6): `recording` when a screen showing the
     /// app's window could be asked. With none - the app in the background, or
     /// before its first window - recording is not measured, never "no", and
-    /// `recording_status` says why: `unavailable`, as on Android with no window
-    /// to ask. The other screens attached are counted either way.
+    /// `recording_status` says why: `unavailable`, with no window to ask. The
+    /// other screens attached are counted either way.
     static func screenCapture(captured: Bool?, otherScreens: Int) -> [String: Any] {
         var result: [String: Any] = ["status": "ok", "external_displays": max(0, otherScreens)]
         if let captured = captured {

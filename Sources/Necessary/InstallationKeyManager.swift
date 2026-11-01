@@ -14,8 +14,8 @@ import Security
 ///   * the payload arrives as base64url TEXT, is base64url-DECODED, and the raw
 ///     bytes are signed — the server verifies over exactly those bytes;
 ///   * the signature is ASN.1 DER. `ecdsaSignatureMessageX962SHA256` produces
-///     X9.62/DER, which is what `SHA256withECDSA` yields on Android and what
-///     a backend verifies. A raw r||s signature would be rejected.
+///     X9.62/DER, which is what a backend verifies. A raw r||s signature
+///     would be rejected.
 final class InstallationKeyManager {
     private static let keyVersion = 2
     private static let maxPayloadBytes = 65536
@@ -29,7 +29,7 @@ final class InstallationKeyManager {
     private let tag: Data
 
     init(bundleIdentifier: String) {
-        // The alias has the same shape on Android, so the two platforms are
+        // The alias has the same shape on every platform, so that they are
         // legible side by side in logs and support tickets.
         alias = "\(bundleIdentifier).device_recognition.installation_key.v2"
         tag = Data(alias.utf8)
@@ -191,8 +191,8 @@ final class InstallationKeyManager {
         return (result as! SecKey)
     }
 
-    /// Secure Enclave first, with a graceful fallback — the shape of StrongBox
-    /// tried first on Android. The Simulator has no Secure Enclave,
+    /// Secure Enclave first, with a graceful fallback. The Simulator has no
+    /// Secure Enclave,
     /// and some configurations refuse a given algorithm, so a failure here must
     /// not leave the app unable to enrol.
     private func generateKey() throws -> SecKey {
@@ -213,8 +213,7 @@ final class InstallationKeyManager {
 
         if useSecureEnclave {
             var accessError: Unmanaged<CFError>?
-            // .privateKeyUsage only - no biometric or passcode gate, like
-            // setUserAuthenticationRequired(false) on Android. The key
+            // .privateKeyUsage only - no biometric or passcode gate. The key
             // must be usable unattended for background integrity scans.
             guard let access = SecAccessControlCreateWithFlags(
                 kCFAllocatorDefault,

@@ -3,18 +3,25 @@
 import Foundation
 import Necessary
 
+/// A backend the example can talk to: its name on the screen, and its base URL.
+struct Backend: Identifiable {
+    let name: String
+    let url: String
+    var id: String { name }
+}
+
 /// The backends to choose among, by name: the build setting NECESSARY_BACKENDS
 /// (`Name=https://…;Other=https://…`), or the one NECESSARY_BACKEND_URL.
-let backends: [(name: String, url: String)] = {
+let backends: [Backend] = {
     let info = Bundle.main.infoDictionary ?? [:]
     let list = (info["NecessaryBackends"] as? String ?? "").trimmingCharacters(in: .whitespaces)
     let single = (info["NecessaryBackendURL"] as? String ?? "").trimmingCharacters(in: .whitespaces)
-    let named: [(name: String, url: String)] = list.split(separator: ";").compactMap { entry in
+    let named: [Backend] = list.split(separator: ";").compactMap { entry -> Backend? in
         guard let equals = entry.firstIndex(of: "=") else { return nil }
-        return (entry[..<equals].trimmingCharacters(in: .whitespaces),
-                entry[entry.index(after: equals)...].trimmingCharacters(in: .whitespaces))
+        return Backend(name: entry[..<equals].trimmingCharacters(in: .whitespaces),
+                       url: entry[entry.index(after: equals)...].trimmingCharacters(in: .whitespaces))
     }
-    return named.isEmpty ? [("Sample", single.isEmpty ? "http://127.0.0.1:8787" : single)] : named
+    return named.isEmpty ? [Backend(name: "Sample", url: single.isEmpty ? "http://127.0.0.1:8787" : single)] : named
 }()
 
 /// A DeviceTrust for the backend at `baseURL`.
