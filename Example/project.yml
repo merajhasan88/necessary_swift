@@ -45,7 +45,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.necessarysdk.example
         PRODUCT_NAME: NecessaryExample
-        MARKETING_VERSION: "0.1.5"
+        MARKETING_VERSION: "0.1.6"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"

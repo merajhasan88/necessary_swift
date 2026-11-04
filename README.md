@@ -33,7 +33,7 @@ In a `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/merajhasan88/necessary_swift", from: "0.1.5"),
+    .package(url: "https://github.com/merajhasan88/necessary_swift", from: "0.1.6"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "Necessary", package: "necessary_swift")]),
