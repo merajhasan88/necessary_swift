@@ -1,8 +1,8 @@
 # Measurements — what the SDK measures on the iPhone
 
 Every measurement this SDK can put in a signed report, field by field: what it is, how the SDK
-measures it, and what a complete answer holds. Every Necessary SDK sends the same report format, and
-none sends a score or a verdict; what a measurement means for a request is your backend's decision. The integration guide
+measures it, and what a complete answer holds. Every Necessary SDK sends its report in the same format,
+and none sends a score or a verdict; what a measurement means for a request is your backend's decision. The integration guide
 (`integration_guide.md`, beside this file) is the protocol — how your backend asks for a scan and checks
 the report — and its section 7 is about deciding with these measurements.
 
@@ -43,8 +43,8 @@ measurements — a probe — and each row of a table one of its fields.
 Each probe says when it comes:
 
 - **your backend asks for it**, in the challenge's `required_probes`. Ask every time for each
-  measurement you rely on, and vary the others from scan to scan;
-- **every scan**, whether or not your backend asks. Rely on one only by asking for it: until you do, its
+  measurement you need, and vary the others from scan to scan;
+- **every scan**, whether or not your backend asks. If you need one, ask for it: until you do, its
   absence or failure does not make a report incomplete;
 - **a personal measurement**, only when your backend lists it in `optional_probes` and your app enables
   it in the SDK (the README says how) — the location only with the person's permission as well.

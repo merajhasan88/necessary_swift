@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- `dyld_images` leaves the app's own folder and main executable out of what it reads as names.
+- A step-up key the phone lost and a re-enrolment made again leaves approvals waiting until the backend
+  takes it, like a key replaced.
+- The Python sample backend answers a malformed request: it used to drop the connection. Its other
+  requests answer as before.
+- `report.schema.json`: `installer_package` is left out or null when no installer is named, as its
+  description now says. No field changed.
+- `doc/measurements.md` and `doc/integration_guide.md`: every SDK sends its report in the same format;
+  "each measurement you need", where they said "rely on".
+
 ## 0.1.5
 
 The first release: the Necessary SDK for iOS apps, in Swift, at the protocol and measurements of the

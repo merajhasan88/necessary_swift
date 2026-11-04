@@ -553,9 +553,10 @@ public final class DeviceTrust {
     /// lost or can no longer use -- the passcode removed (`STEPUP_KEY_INVALIDATED`) -- or one made for
     /// other options: the person unlocks the new key to sign its proof, the phone showing `reason`, and
     /// the backend takes it for that account alone (the integration guide, section 3). Approvals use it
-    /// from then on. A key replaced before the backend took the new one -- the person cancelled, the
-    /// password was wrong, the answer was lost -- leaves step-up waiting: approvals answer
-    /// `STEPUP_REENROL_PENDING`, across restarts too, until a call of this succeeds.
+    /// from then on. A key replaced, or made again where the phone lost it, before the backend took
+    /// the new one -- the person cancelled, the password was wrong, the answer was lost -- leaves
+    /// step-up waiting: approvals answer `STEPUP_REENROL_PENDING`, across restarts too, until a call of
+    /// this succeeds.
     @discardableResult
     public func reenrolStepUp(session: String, reauthentication: JSONObject = JSONObject(),
                               reason: String = "Confirm your new step-up key") async throws -> JSONObject {
@@ -579,20 +580,29 @@ public final class DeviceTrust {
         let provider = stepUpKeyProvider
         let store = self.store
 
+        // From here the phone's key and the backend's differ until the backend takes the new one:
+        // approvals wait for that.
+        func holdApprovals() async throws {
+            try await mutate(generation) { try await store.setStepUpReenrolPending(true) }
+            try current(generation)
+            offeredStepUpKey = nil
+            stepUpUnavailable = DeviceTrust.reenrolPending()
+        }
+
         func newKey(replace: Bool) async throws -> StepUpKeyMetadata {
             if replace {
-                // From here the phone's key and the backend's differ until the backend takes the new
-                // one: approvals wait for that.
-                try await mutate(generation) { try await store.setStepUpReenrolPending(true) }
-                try current(generation)
-                offeredStepUpKey = nil
-                stepUpUnavailable = DeviceTrust.reenrolPending()
+                try await holdApprovals()
                 try await mutate(generation) { try await provider.deleteKey() }
             }
-            return try await mutate(generation) {
+            let key = try await mutate(generation) {
                 try await provider.getOrCreateKey(factor: options.factor, mode: options.mode,
                                                   windowSeconds: options.windowSeconds)
             }
+            // None to replace, the phone having lost it: this one is as new.
+            if key.created && !replace {
+                try await holdApprovals()
+            }
+            return key
         }
 
         // A re-enrolment is the explicit recovery: a key the keystore cannot vouch for

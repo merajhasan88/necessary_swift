@@ -211,6 +211,30 @@ final class CancelledStepUpKey: DyingStepUpKey {
     }
 }
 
+/// A key the phone lost after it was registered: the next one is made new, and the person cancels its
+/// first prompt.
+@MainActor
+final class LostStepUpKey: FakeStepUpKey {
+    var asked = 0
+    var cancelled = false
+
+    override func getOrCreateKey(factor: String, mode: String, windowSeconds: Int) async throws -> StepUpKeyMetadata {
+        asked += 1
+        let key = try await super.getOrCreateKey(factor: factor, mode: mode, windowSeconds: windowSeconds)
+        return StepUpKeyMetadata(publicKey: key.publicKey, factor: key.factor, mode: key.mode,
+                                 windowSeconds: key.windowSeconds, securityLevel: key.securityLevel,
+                                 hardwareBacked: key.hardwareBacked, created: asked > 1)
+    }
+
+    override func sign(_ payloadBase64Url: String, reason: String) async throws -> String {
+        if asked > 1 && !cancelled {
+            cancelled = true
+            throw NativeKeyError("STEPUP_CANCELLED", "the person cancelled")
+        }
+        return try await super.sign(payloadBase64Url, reason: reason)
+    }
+}
+
 /// Refuses the first key it is asked for, then makes one.
 @MainActor
 final class FlakyStepUpKey: FakeStepUpKey {
@@ -265,6 +289,16 @@ final class DeviceTrustTests: XCTestCase {
         XCTAssertEqual(registration["stepup_key_auth"], ["factor": "passcode", "mode": "per_use", "window_seconds": 0])
         XCTAssertEqual(backend.calls[2].body["signature"], "signed")
         XCTAssertEqual(trust.installationSession, "installation-session")
+    }
+
+    func testAnAnswerThatLacksAFieldIsAnInvalidAnswerNeverACrash() async throws {
+        let unverified = makeTrust(FakeBackend(["/v1/installations/verify": [.object(JSONObject())]]))
+        let noToken = await thrown { try await unverified.start() }
+        XCTAssertTrue(noToken is InvalidAnswerError, String(describing: noToken))
+        let trust = makeTrust(FakeBackend(["/v1/integrity/challenge": [.object(["challenge_id": "scan-challenge"])]]))
+        try await trust.start()
+        let noNonce = await thrown { try await trust.scan() }
+        XCTAssertTrue(noNonce is InvalidAnswerError, String(describing: noNonce))
     }
 
     func testTheInstallationTheBackendHoldsForTheKeyIsKept() async throws {
@@ -374,6 +408,25 @@ final class DeviceTrustTests: XCTestCase {
         XCTAssertFalse(store.reenrolPending)
         XCTAssertNil(restarted.stepUpUnavailable)
         let approval = try await approve(restarted)
+        XCTAssertNotNil(approval.headers["X-Step-Up-Proof"])
+    }
+
+    func testAKeyThePhoneLostMadeAgainByAReenrolmentThePersonCancelledLeavesApprovalsWaitingToo() async throws {
+        let store = FakeStore()
+        let trust = makeTrust(FakeBackend(), store: store, stepUpKey: LostStepUpKey(), stepUp: StepUpOptions())
+        try await trust.start()
+        func reenrol() async throws -> JSONObject {
+            try await trust.reenrolStepUp(session: "account-session", reauthentication: ["password": "pw"])
+        }
+        let cancelled = await nativeCode { try await reenrol() }
+        XCTAssertEqual(cancelled, "STEPUP_CANCELLED")
+        let pending = await nativeCode { try await approve(trust) }
+        XCTAssertEqual(pending, "STEPUP_REENROL_PENDING")
+        XCTAssertTrue(store.reenrolPending)
+        let answer = try await reenrol()
+        XCTAssertEqual(answer["stepup_key_registered"], true)
+        XCTAssertFalse(store.reenrolPending)
+        let approval = try await approve(trust)
         XCTAssertNotNil(approval.headers["X-Step-Up-Proof"])
     }
 

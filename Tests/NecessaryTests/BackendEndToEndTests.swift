@@ -147,19 +147,24 @@ private func e2eTrust(stepUp: StepUpOptions? = nil, appPin: AppPinOptions? = nil
                 stepUpKey: stepUpKey ?? E2EStepUpKey())
 }
 
-/// A test control, and its answer.
-private func control(_ path: String, _ body: JSONObject) async throws -> JSONObject {
+/// A POST of `body` straight to the backend: its answer and status, or the failure of the connection.
+private func post(_ path: String, _ body: JSONObject, token: String? = nil) async throws -> (Data, Int) {
     var request = URLRequest(url: URL(string: backend! + path)!)
     request.httpMethod = "POST"
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-    request.setValue(testToken ?? "", forHTTPHeaderField: "X-Test-Token")
+    if let token { request.setValue(token, forHTTPHeaderField: "X-Test-Token") }
     request.httpBody = Data(body.encodedJSON.utf8)
-    let (data, status): (Data, Int) = try await withCheckedThrowingContinuation { continuation in
+    return try await withCheckedThrowingContinuation { continuation in
         URLSession.shared.dataTask(with: request) { data, response, error in
             if let error { return continuation.resume(throwing: error) }
             continuation.resume(returning: (data ?? Data(), (response as? HTTPURLResponse)?.statusCode ?? 0))
         }.resume()
     }
+}
+
+/// A test control, and its answer.
+private func control(_ path: String, _ body: JSONObject) async throws -> JSONObject {
+    let (data, status) = try await post(path, body, token: testToken ?? "")
     XCTAssertEqual(status, 200, "the backend runs with --test-controls, answering NECESSARY_TEST_TOKEN")
     return try JSONObject(parsing: data)
 }
@@ -231,6 +236,18 @@ final class BackendEndToEndTests: XCTestCase {
         }
         // Every personal measurement is asked for, so that the example app can show each one it enables.
         XCTAssertEqual(scan.challenge.optionalProbes, PersonalMeasurement.allCases.map(\.wireName))
+    }
+
+    func testAMalformedRequestIsAnsweredNeverAConnectionDropped() async throws {
+        func answered(_ path: String, _ body: JSONObject) async throws {
+            let (data, status) = try await post(path, body)
+            XCTAssertGreaterThanOrEqual(status, 400, path)
+            XCTAssertNotNil(try JSONObject(parsing: data)["error"]?.objectValue, path)
+        }
+        // A payload that is valid base64url, of JSON that is no object.
+        try await answered("/v1/installations/verify", ["payload": .string(base64UrlNoPadding(Data("[]".utf8)))])
+        try await answered("/v1/installations/challenge", ["installation_id": .array([])])
+        try await answered("/v1/installations/register", ["installation_id": 5])
     }
 
     func testARequestCarriesItsProofOnce() async throws {

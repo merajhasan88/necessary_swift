@@ -380,7 +380,22 @@ final class ProbeReadsTests: XCTestCase {
             expect(ProbeReads.arm64Slice([0, 0, 0, 0, 0, 0, 0, 0]) == nil, "neither: nil")
         }
 
+        do {  // The app's own names are no tool's; what it carries beside them is read.
+            let tokens = ["tool", "gadget", "flex"]
+            let bundle = "/private/var/containers/Bundle/Application/A1B2/Toolbox.app"
+            func named(_ path: String) -> [String] {
+                ProbeReads.imageTokens(path: path, bundlePath: bundle, mainExecutable: "Toolbox", tokens: tokens)
+            }
+            expect(named(bundle + "/Toolbox").isEmpty, "the main executable names no tool")
+            expect(named(bundle + "/Frameworks/Engine.framework/Engine").isEmpty, "the bundle's path names no tool")
+            expect(named(bundle + "/Frameworks/ToolGadget.dylib") == ["tool", "gadget"],
+                   "a library the app was rebuilt with is found by its own name")
+            expect(named("/usr/lib/libFLEX.dylib") == ["flex"], "an image outside the bundle is read whole")
+            expect(ProbeReads.imageTokens(path: bundle + "/Toolbox", bundlePath: bundle, mainExecutable: nil, tokens: tokens)
+                   == ["tool"], "with no main executable to tell by, the name is read")
+        }
+
         XCTAssertEqual(failures, [], "the broken expectations")
-        XCTAssertEqual(passed, 338, "every check of tools/ios/check_probe_reads ran")
+        XCTAssertEqual(passed, 343, "every check of tools/ios/check_probe_reads ran")
     }
 }
