@@ -395,7 +395,34 @@ final class ProbeReadsTests: XCTestCase {
                    == ["tool"], "with no main executable to tell by, the name is read")
         }
 
+        do {  // Whether Apple stores the app's code encrypted (collector 9), from its load commands.
+            func le(_ value: Int) -> [UInt8] { (0..<4).map { UInt8((value >> (8 * $0)) & 0xff) } }
+            func image(_ commands: [[UInt8]], magic: Int = 0xfeed_facf) -> [UInt8] {
+                let body = commands.flatMap { $0 }
+                // magic, cputype arm64, cpusubtype, filetype MH_EXECUTE, ncmds, sizeofcmds, flags, reserved
+                return le(magic) + le(0x0100_000c) + le(0) + le(2) + le(commands.count) + le(body.count) + le(0) + le(0) + body
+            }
+            let segment = le(0x19) + le(72) + [UInt8](repeating: 0, count: 64)          // LC_SEGMENT_64, no sections
+            func encryption(_ cryptID: Int) -> [UInt8] { le(0x2c) + le(24) + le(16384) + le(1_048_576) + le(cryptID) + le(0) }
+            let uuid = le(0x1b) + le(24) + [UInt8](repeating: 7, count: 16)              // LC_UUID
+            expect(ProbeReads.executableEncrypted(machHeader: image([segment, encryption(1), uuid])) == true,
+                   "an App Store or TestFlight build: cryptid 1, encrypted")
+            expect(ProbeReads.executableEncrypted(machHeader: image([segment, encryption(0), uuid])) == false,
+                   "a copy decrypted, or a build Apple did not distribute: cryptid 0")
+            expect(ProbeReads.executableEncrypted(machHeader: image([segment, uuid])) == false,
+                   "no encryption command: stored in the clear")
+            let whole = image([segment, encryption(1)])
+            expect(ProbeReads.executableEncrypted(machHeader: Array(whole.prefix(whole.count - 4))) == nil,
+                   "commands cut short: not read, never clean")
+            expect(ProbeReads.executableEncrypted(machHeader: image([segment, encryption(1)], magic: 0xfeed_face)) == nil,
+                   "a 32-bit header: not read")
+            var running = image([segment, encryption(1)])
+            running[32 + 72 + 4] = 200  // the encryption command claims to run past the commands
+            expect(ProbeReads.executableEncrypted(machHeader: running) == nil, "a command past the end: not read")
+            expect(ProbeReads.executableEncrypted(machHeader: []) == nil, "nothing: not read")
+        }
+
         XCTAssertEqual(failures, [], "the broken expectations")
-        XCTAssertEqual(passed, 343, "every check of tools/ios/check_probe_reads ran")
+        XCTAssertEqual(passed, 350, "every check of tools/ios/check_probe_reads ran")
     }
 }

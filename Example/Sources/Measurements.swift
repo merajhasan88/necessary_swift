@@ -52,7 +52,8 @@ let iosMeasurements: [MeasurementInfo] = [
                         + "changes bytes, and app_diff_bytes counts them.", group: .hooks),
     MeasurementInfo(name: "debugger", title: "Debugger", about: "A debugger tracing the process.", group: .hooks),
     MeasurementInfo(name: "app_identity", title: "App identity",
-                    about: "The installed app and its executable's hash.", group: .app),
+                    about: "The installed app, its executable's hash, and whether Apple stores its code "
+                        + "encrypted.", group: .app),
     MeasurementInfo(name: "code_signing", title: "Code signing",
                     about: "The executable's own code signature.", group: .app),
     MeasurementInfo(name: "jailbreak_files", title: "Jailbreak files",

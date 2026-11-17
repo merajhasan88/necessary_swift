@@ -518,7 +518,7 @@ versions, or keep their scans apart as older evidence.
 
 | Probe | What it tells you | Fields |
 |---|---|---|
-| `app_identity` | the installed app and its executable's hash | `bundle_id`, `executable_sha256`, `version_name`, `version_code`, `executable_bytes` |
+| `app_identity` | the installed app, its executable's hash, and whether Apple stores its code encrypted | `bundle_id`, `executable_sha256`, `version_name`, `version_code`, `executable_bytes`, `executable_encrypted` |
 | `code_signing` | the executable's own code signature | `signing_identifier`, `team_identifier`, `get_task_allow`, `signed`, `signature_absent`, `signature_parse_error`, `code_directory_flags`, `entitlement_count` |
 | `debugger` | a debugger tracing the process | `traced` |
 | `jailbreak_files` | known jailbreak paths that exist | `found_paths`, `checked_count` |
@@ -551,7 +551,9 @@ what your own server observed, where the requests come from, and what happened a
 - **The phone never sends a score or a verdict. You decide, on your server.**
 - **Weigh each measurement by how rare it is on genuine phones, and by what is at stake.** Developer
   options, USB debugging and a VPN are common on honest phones; an instrumentation framework in memory, a
-  debugger attached, code changed in memory, or an app that is not your own signed build are not.
+  debugger attached, code changed in memory, or an app that is not your own signed build are not. Nor is
+  the code of an app you ship through the App Store or TestFlight stored in the clear (`app_identity`).
+  Genuine users can show even these; section 7.7 says who, and what to do.
 - **Compare the app with your release** — its files, its code and its size, as section 7.2 describes. A
   modified app is the most direct attack on everything else here: it holds a genuine key.
 - **Compare a phone with itself.** A sudden change between one phone's reports — another signing
@@ -576,8 +578,12 @@ normal looks like.
 
 1. **The installed files** (`app_identity`). A single changed byte changes a hash: record the main
    executable's SHA-256 and its **size in bytes** (`executable_sha256`, `executable_bytes`) — an
-   executable with code added is larger — and your team identifier (`team_identifier`, in
-   `code_signing`).
+   executable with code added is larger; your team identifier (`team_identifier`, in `code_signing`);
+   and, for an app you ship through the App Store or TestFlight, whether its code is stored encrypted
+   (`executable_encrypted`), as Apple stores what it delivers. A copy decrypted and installed some other
+   way is not the one Apple delivered, whatever else it keeps. As measured: a build installed through
+   TestFlight read true on an iPhone with iOS 27, and a build installed outside the App Store false on an
+   iPhone with iOS 15.8.
 
    A report whose files match no release of yours is not your app as you built it.
 2. **The code in memory** (`code_integrity`). The plugin compares the app's code as it runs with the
@@ -585,7 +591,9 @@ normal looks like.
    running, which should never happen. Its **size** tells you what was loaded: `app_images_expected`
    counts the app's own images in memory and `app_expected_bytes` their code — an injected library is
    one image more and its code more than your release ever loads. Compare both with your release's
-   record. A comparison short of complete measured only part of the code.
+   record. A comparison short of complete measured only part of the code. A build from the App Store or
+   TestFlight is one: its main executable is encrypted on disk, so it is left out and named in
+   `app_images_not_compared`, and `app_complete` is false on every phone, as your release's record shows.
 
 Compare a phone with itself too: the same installation reporting other hashes without an update, or an
 older build than before, is an app that changed under it.
@@ -665,6 +673,28 @@ How the common patterns show up:
 Run every new rule silently first: record what it would have done, measure how many genuine customers it
 would have stopped, and only then turn it on, with a review queue for what it holds. Check your rules
 against your outcomes regularly — fraud adapts to them.
+
+### 7.7 Genuine users who show a strong reading
+
+A strong reading is rare on genuine phones, not impossible. Before you refuse on one, know who else shows
+it, and give them a way through that a fraudster cannot take.
+
+| The reading | Genuine users who show it | How to tell | What to do |
+|---|---|---|---|
+| An app's code in the clear: `app_identity`, `executable_encrypted` false | Users of your own development, ad hoc or enterprise builds, such as your testers, which Apple never encrypts | `code_signing` names your team; your distribution says which builds went through the App Store or TestFlight | Read it only for an app you ship through the App Store or TestFlight. There, the code in the clear is a copy that is not the one Apple delivered: Refuse what matters. Test your other builds against a backend of your own |
+
+- **Refuse the action, not the user.** A strong reading can hold a payment while the user still reads
+  their account.
+- **Tell the user only what to do next,** as section 7.4 says, such as installing your app from the App
+  Store, updating the phone's software or contacting support, and never which reading mattered.
+- **Give support a way to look.** Keep each refused scan's SHA-256 with the decision (section 7.5), so that
+  support can see which reading it was and record what they decided.
+- **Clear an installation, not a model.** When support clears a genuine user, clear that installation,
+  and look again if its readings change.
+- **A reading that could not be measured is not one.** A measurement that says it could not read, in
+  `unread` or as an error, is neither clean nor proof of anything (section 7.1).
+- **Count before you refuse** (section 7.6): how many of your customers show each reading, and which of
+  them are genuine.
 
 ---
 

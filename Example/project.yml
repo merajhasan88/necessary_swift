@@ -38,6 +38,8 @@ targets:
         NSLocationWhenInUseUsageDescription: The location measurements report the last location this iPhone already knows.
         NSFaceIDUsageDescription: Face ID approves requests when biometric step-up is on.
         NSLocalNetworkUsageDescription: The example talks to a sample backend on your network.
+        # Only the system's own cryptography: no export-compliance question for a TestFlight build.
+        ITSAppUsesNonExemptEncryption: false
         NSAppTransportSecurity:
           # A sample backend on the local network, over plain HTTP, for a debug build.
           NSAllowsLocalNetworking: true
@@ -45,7 +47,7 @@ targets:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.necessarysdk.example
         PRODUCT_NAME: NecessaryExample
-        MARKETING_VERSION: "0.1.6"
+        MARKETING_VERSION: "0.1.7"
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.0"
         TARGETED_DEVICE_FAMILY: "1,2"

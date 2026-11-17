@@ -6,7 +6,7 @@ measurements of the phone and of the app running on it, and a proof on each requ
 and, if you turn them on, a second key the person must unlock to approve a request, and a PIN your
 backend checks. **It never scores and never decides: your backend does.**
 
-iOS 15 and later, for apps built with Swift 5.9 or later. The measuring code, the collector, is version 8.
+iOS 15 and later, for apps built with Swift 5.9 or later. The measuring code, the collector, is version 9.
 
 The SDK's website is **[necessarysdk.com](https://necessarysdk.com)**.
 
@@ -19,7 +19,7 @@ The SDK's website is **[necessarysdk.com](https://necessarysdk.com)**.
 - [The measurement contract](contract/report-1/android-8-ios-5/) — the report's schema, its rules and
   sample reports, the same for every Necessary SDK. The folder's name is two versions: `report-1` is the
   report's format, and the rest the lowest versions of the measuring code, the collector, that the
-  contract accepts on each platform — on iOS 5 (`collector_version`; this SDK's is 8). They are not the iOS
+  contract accepts on each platform — on iOS 5 (`collector_version`; this SDK's is 9). They are not the iOS
   versions the SDK runs on, which are above.
 - [The example app](Example/) puts every piece below in a working app, against the
   [sample backends](backend/) (in the repository, not in the package). [Try the example
@@ -33,7 +33,7 @@ In a `Package.swift`:
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/merajhasan88/necessary_swift", from: "0.1.6"),
+    .package(url: "https://github.com/merajhasan88/necessary_swift", from: "0.1.7"),
 ],
 targets: [
     .target(name: "MyApp", dependencies: [.product(name: "Necessary", package: "necessary_swift")]),
@@ -309,11 +309,13 @@ with Xcode 15 or later.
    cd necessary_swift
    ```
 
-2. Start a sample backend on your computer. It answers on `127.0.0.1` only. In Python 3.10 or later:
+2. Start a sample backend on your computer. It answers on `127.0.0.1` only. In Python 3.11 or later, with
+   its packages in a virtual environment of its own:
 
    ```sh
-   pip install --require-hashes -r backend/python/requirements.txt
-   python3 backend/python/server.py --port 8787 --schema contract/report-1/android-8-ios-5/report.schema.json
+   python3 -m venv .venv
+   .venv/bin/python -m pip install --require-hashes -r backend/python/requirements.txt
+   .venv/bin/python backend/python/server.py --port 8787 --schema contract/report-1/android-8-ios-5/report.schema.json
    ```
 
    The TypeScript and C# samples run the same way; their commands are in

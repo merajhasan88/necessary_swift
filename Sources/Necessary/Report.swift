@@ -6,7 +6,7 @@ public let reportByteLimit = 65536
 /// The lists a report may shorten, by measurement -- each beside the `truncated` flag that says the
 /// phone had more (the measurement contract, section 6).
 public let shortenableLists: [(probe: String, lists: [String])] = [
-    ("accessibility", ["services", "settings_only"]),
+    ("accessibility", ["services", "settings_only", "tool_services", "gesture_services"]),
     ("notification_access", ["listeners"]),
     ("other_access", ["device_admins", "remote_access_apps"]),
 ]

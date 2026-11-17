@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.1.7
+
+- `app_identity` says whether the app's main executable is stored encrypted (`executable_encrypted`), as
+  Apple stores an app it distributes through the App Store or TestFlight. A copy decrypted and installed
+  some other way, and a development, ad hoc or enterprise build, keeps it in the clear.
+  `doc/measurements.md` says how to read it.
+- The integration guide's new section 7.7 says which genuine users show that reading and what to do; the
+  guide also says that a build from the App Store or TestFlight never compares its main executable, so
+  `app_complete` is false there on every phone.
+- The collector is version 9.
+- The contract is the one every SDK now sends to: Its schema names `executable_encrypted`.
+- The example's steps start the Python sample backend in Python 3.11 or later, with its packages in a
+  virtual environment of its own (`.venv`), and the Python sample stops quietly on Ctrl+C.
+
 ## 0.1.6
 
 - `dyld_images` leaves the app's own folder and main executable out of what it reads as names.
